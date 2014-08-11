@@ -21,12 +21,15 @@ from django.contrib.auth import (authenticate, login as login_user,
     logout as logout_user)
 from django.contrib.auth.models import User
 from django.contrib import messages
+from django import forms
+from django.core import signing
 from django.conf import settings
 from django.core.mail import send_mail
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.translation import ugettext as _
 from accounts.forms import AccountForm
-from accounts.models import UserProfile
+from utils.password import validate_password, hash_password
+from accounts.models import UserProfile, User
 from datetime import datetime
 import random
 import string
@@ -34,6 +37,12 @@ try:
     import simplejson as json
 except ImportError:
     import json
+
+class SignupForm(forms.Form):
+    username = forms.CharField()
+    email = forms.CharField()
+    password = forms.CharField(label="Password", widget=forms.PasswordInput(
+        attrs={'class': 'required'}))
 
 @require_http_methods(["GET", "POST"])
 def login(request):
@@ -77,6 +86,32 @@ def api_login(request):
 def logout(request):
     logout_user(request)
     return redirect(reverse('index'))
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def signup(req):
+    req.user = None
+    if req.method == 'POST':
+        if validate_password(req.POST['password']):
+            form = SignupForm(req.POST)
+            if form.is_valid():
+                user = User.objects.filter(username=req.POST['username'])
+                if not user:
+                    user = User.objects.create(
+                        username=req.POST['username'],
+                        email=req.POST['email']
+                    )
+                    user.set_password(req.POST['password'])
+                    user.save()
+                    user = authenticate(username=req.POST['username'], password=req.POST['password'])
+                    login_user(req,user)
+                    return redirect(reverse('index'))
+
+                else:
+                    messages.error(req, _('Email or Username has been used,'
+                        'please choose another username'))
+    return render_to_response('accounts/signup.html',
+        context_instance=RequestContext(req))
 
 @login_required
 def details(request):
